@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#define MAX_ITERATIONS 5
+
 #define BASE 16
 
 #define MAX(a,b) ((a) >= (b) ? (a) : (b))
@@ -24,7 +26,7 @@ typedef struct {
     int size;
 } BigInt;
 
-BigInt two, three;
+BigInt one, two, three;
 BigInt scale;
 
 void bigint_init(BigInt *a, int value) {
@@ -35,6 +37,42 @@ void bigint_init(BigInt *a, int value) {
         value >>= 4;
     }
     if (a->size == 0) a->size = 1;
+}
+
+double bigint_to_double(const BigInt *bigint) {
+	double result = 0.0;
+	double base_power = 1.0; // Represents the positional value of each digit.
+
+	for (int i = 0; i < bigint->size; i++) {
+		result += bigint->digits[i] * base_power;
+		base_power *= BASE; // Scale the base power for the next digit.
+	}
+
+	return result;
+}
+
+void bigint_from_double(BigInt *bigint, double value) {
+	// Clear the BigInt and initialize
+	bigint_init(bigint, 0);
+
+	if (value < 0) {
+		printf("Error: can not handle negative values!\n");
+		exit(1);
+	}
+
+	// Extract the integer part of the double
+	unsigned long long int_part = (unsigned long long)value;
+
+	// Extract digits from the integer part
+	while (int_part > 0) {
+	    bigint->digits[bigint->size++] = int_part % BASE;
+	    int_part /= BASE;
+	}
+
+	// If the value was a pure fractional number (e.g., 0.5), handle it as 0
+	if (bigint->size == 0) {
+	    bigint->digits[bigint->size++] = 0;
+	}
 }
 
 void bigint_add(const BigInt *a, const BigInt *b, BigInt *res) {
@@ -205,6 +243,59 @@ void bigint_divide(const BigInt *a, const BigInt *b, BigInt *quotient) {
     }
 }
 
+void compute_reciprocal(const BigInt *b, BigInt *reciprocal) {
+	BigInt guess, temp, temp2, temp3;
+	bigint_init(&guess, 10);
+	bigint_init(&temp, 0);
+
+	BigInt y;
+	bigint_init(&y, 10);
+
+	// Iterative refinement (Newton's Method).
+	for (int i = 0; i < MAX_ITERATIONS; i++) {
+		bigint_init(&temp2, 0);
+		bigint_init(&temp3, 0);
+		// Compute: guess = guess * (2 - b * guess)
+		bigint_multiply(b, &guess, &temp);          // temp = b * guess
+		bigint_subtract(&y, &temp, &temp3);        // temp = 2 - temp
+		bigint_multiply(&guess, &temp3, &temp2);    // guess = guess * temp
+		guess = temp2;
+	}
+
+	*reciprocal = guess;
+}
+
+void truncate_precision(BigInt *value, int precision) {
+	// Truncate value to the required number of digits.
+	if (value->size > precision) {
+		value->size = precision;
+	}
+}
+
+void bigint_divide2(const BigInt *a, const BigInt *b, BigInt *quotient) {
+	BigInt reciprocal, temp;
+	bigint_init(&reciprocal, 0);
+	bigint_init(&temp, 0);
+
+	// Step 1: Compute reciprocal of b using Newton's method.
+	compute_reciprocal(b, &reciprocal);
+
+	// Step 2: Multiply a by reciprocal to compute the quotient.
+	bigint_multiply(a, &reciprocal, quotient);
+
+	// Step 3: Truncate extra precision (if needed).
+	truncate_precision(quotient, a->size - b->size);
+
+	// Step 4: Remove any residual error by correction.
+	BigInt correction;
+	bigint_init(&correction, 0);
+	bigint_multiply(b, quotient, &correction);
+
+	if (bigint_compare(&correction, a) > 0) {
+		bigint_subtract(quotient, &one, quotient);
+	}
+}
+
 void evalpoly(const BigInt *x, const int *coeffs, int deriv, BigInt *result) {
 	BigInt temp = {};
 
@@ -267,17 +358,24 @@ int test() {
 	bigint_print(&res);
 
 	bigint_multiply_int(&six, 10, &six);
-	bigint_divide(&six, &five, &res);
+	bigint_divide2(&six, &five, &res);
 	bigint_print(&res);
 
 	BigInt a, b;
 	bigint_init(&a, 100);
 	bigint_init(&b, 99);
-	bigint_divide(&a, &b, &res);
+	bigint_divide2(&a, &b, &res);
 	bigint_print(&res);
 }
 
 int main() {
+	bigint_init(&one, 1);
+	bigint_init(&two, 2);
+	bigint_init(&three, 3);
+
+	test();
+	return 0;
+
     BigInt x;
     bigint_init(&scale, 0);
     bigint_init(&x, 0);
@@ -289,8 +387,6 @@ int main() {
         bigint_multiply_int(&scale, 10, &scale);
     }
 
-	bigint_init(&two, 2);
-	bigint_init(&three, 3);
 
 
     BigInt res;
